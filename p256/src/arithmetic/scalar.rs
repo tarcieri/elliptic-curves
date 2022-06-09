@@ -2,6 +2,10 @@
 
 pub mod blinded;
 
+#[cfg_attr(target_pointer_width = "32", path = "scalar/p256_scalar_32.rs")]
+#[cfg_attr(target_pointer_width = "64", path = "scalar/p256_scalar_64.rs")]
+mod scalar_impl;
+
 use crate::{
     arithmetic::util::{adc, mac, sbb},
     FieldBytes, NistP256, SecretKey,

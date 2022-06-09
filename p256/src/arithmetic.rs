@@ -1,5 +1,8 @@
 //! Pure Rust implementation of group operations on secp256r1.
 
+#[macro_use]
+mod macros;
+
 pub(crate) mod affine;
 pub(crate) mod field;
 #[cfg(feature = "hash2curve")]
@@ -15,17 +18,13 @@ use scalar::Scalar;
 
 /// a = -3
 const CURVE_EQUATION_A: FieldElement = FieldElement::ZERO
-    .subtract(&FieldElement::ONE)
-    .subtract(&FieldElement::ONE)
-    .subtract(&FieldElement::ONE);
+    .sub(&FieldElement::ONE)
+    .sub(&FieldElement::ONE)
+    .sub(&FieldElement::ONE);
 
 /// b = 0x5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B
-const CURVE_EQUATION_B: FieldElement = FieldElement([
-    0xd89c_df62_29c4_bddf,
-    0xacf0_05cd_7884_3090,
-    0xe5a2_20ab_f721_2ed6,
-    0xdc30_061d_0487_4834,
-]);
+const CURVE_EQUATION_B: FieldElement =
+    FieldElement::from_be_hex("5AC635D8AA3A93E7B3EBBD55769886BC651D06B0CC53B0F63BCE3C3E27D2604B");
 
 #[cfg(test)]
 mod tests {

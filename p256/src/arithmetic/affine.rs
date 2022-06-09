@@ -9,7 +9,7 @@ use elliptic_curve::{
     bigint::Encoding,
     group::{prime::PrimeCurveAffine, GroupEncoding},
     sec1::{self, FromEncodedPoint, ToCompactEncodedPoint, ToEncodedPoint},
-    subtle::{Choice, ConditionallySelectable, ConstantTimeEq, CtOption},
+    subtle::{Choice, ConditionallySelectable, ConstantTimeEq, ConstantTimeGreater, CtOption},
     zeroize::DefaultIsZeroes,
     AffineArithmetic, AffineXCoordinate, Curve, DecompactPoint, DecompressPoint, Error, Result,
 };
@@ -68,20 +68,12 @@ impl AffinePoint {
     /// Gᵧ = 4fe342e2 fe1a7f9b 8ee7eb4a 7c0f9e16 2bce3357 6b315ece cbb64068 37bf51f5
     /// ```
     pub const GENERATOR: Self = Self {
-        x: FieldElement([
-            0xf4a1_3945_d898_c296,
-            0x7703_7d81_2deb_33a0,
-            0xf8bc_e6e5_63a4_40f2,
-            0x6b17_d1f2_e12c_4247,
-        ])
-        .to_montgomery(),
-        y: FieldElement([
-            0xcbb6_4068_37bf_51f5,
-            0x2bce_3357_6b31_5ece,
-            0x8ee7_eb4a_7c0f_9e16,
-            0x4fe3_42e2_fe1a_7f9b,
-        ])
-        .to_montgomery(),
+        x: FieldElement::from_be_hex(
+            "6b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c296",
+        ),
+        y: FieldElement::from_be_hex(
+            "4fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5",
+        ),
         infinity: 0,
     };
 }
@@ -181,7 +173,7 @@ impl DecompressPoint<NistP256> for AffinePoint {
 
             beta.map(|beta| {
                 let y = FieldElement::conditional_select(
-                    &(MODULUS - &beta),
+                    &(FieldElement(MODULUS) - &beta),
                     &beta,
                     beta.is_odd().ct_eq(&y_is_odd),
                 );
@@ -224,16 +216,18 @@ impl GroupEncoding for AffinePoint {
 impl DecompactPoint<NistP256> for AffinePoint {
     fn decompact(x_bytes: &FieldBytes) -> CtOption<Self> {
         FieldElement::from_bytes(x_bytes).and_then(|x| {
-            let montgomery_y = (x * &x * &x + &(CURVE_EQUATION_A * &x) + &CURVE_EQUATION_B).sqrt();
-            montgomery_y.map(|montgomery_y| {
-                // Convert to canonical form for comparisons
-                let y = montgomery_y.to_canonical();
-                let p_y = MODULUS.subtract(&y);
-                let (_, borrow) = p_y.informed_subtract(&y);
-                let recovered_y = if borrow == 0 { y } else { p_y };
+            let y = (x * &x * &x + &(CURVE_EQUATION_A * &x) + &CURVE_EQUATION_B).sqrt();
+            y.map(|y| {
+                let p_y = -y;
+                let recovered_y = FieldElement::conditional_select(
+                    &y,
+                    &p_y,
+                    // Convert to canonical form for comparisons
+                    y.to_canonical().ct_gt(&p_y.to_canonical()),
+                );
                 AffinePoint {
                     x,
-                    y: recovered_y.to_montgomery(),
+                    y: recovered_y,
                     infinity: 0,
                 }
             })
@@ -289,20 +283,15 @@ impl ToEncodedPoint<NistP256> for AffinePoint {
 impl ToCompactEncodedPoint<NistP256> for AffinePoint {
     /// Serialize this value as a  SEC1 compact [`EncodedPoint`]
     fn to_compact_encoded_point(&self) -> CtOption<EncodedPoint> {
-        // Convert to canonical form for comparisons
-        let y = self.y.to_canonical();
-        let (p_y, borrow) = MODULUS.informed_subtract(&y);
-        assert_eq!(borrow, 0);
-        let (_, borrow) = p_y.informed_subtract(&y);
-
         // Reuse the CompressedPoint type since it's the same size as a compact point
         let mut bytes = CompressedPoint::default();
         bytes[0] = sec1::Tag::Compact.into();
         bytes[1..(<NistP256 as Curve>::UInt::BYTE_SIZE + 1)].copy_from_slice(&self.x.to_bytes());
-        CtOption::new(
-            EncodedPoint::from_bytes(bytes).expect("compact key"),
-            borrow.ct_eq(&0),
-        )
+        let point = EncodedPoint::from_bytes(bytes).expect("compact key");
+
+        // Convert to canonical form for comparisons
+        let is_some = (-self.y).to_canonical().ct_gt(&self.y.to_canonical());
+        CtOption::new(point, is_some)
     }
 }
 
